@@ -67,6 +67,7 @@ export class userUseCase {
 
         console.log(secret)
         console.log(refreshSecret)
+
         // generate jwt
         const accessToken = sign({ userId: user.id, email: user.email, name: user.name, surname: user.surname }, secret, { expiresIn: '15m' });
         const refreshToken = sign({ userId: user.id, email: user.email, name: user.name, surname: user.surname }, refreshSecret, { expiresIn: '7d' });
