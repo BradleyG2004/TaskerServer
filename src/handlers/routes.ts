@@ -3,6 +3,7 @@ import { verify, sign } from "jsonwebtoken";
 import { User } from "../database/entities/user";
 import { Token } from "../database/entities/token";
 import { List } from "../database/entities/list";
+import { Task } from "../database/entities/task";
 import { AppDataSource } from "../database/database";
 import express, { Request, Response } from "express";
 import { createUserValidation, logUserValidation } from "./validators/user-validator";
@@ -269,4 +270,84 @@ export const initRoutes = (app: express.Express) => {
         }
     })
 
+    app.post('/task', isAuthenticated, async (req: Request, res: Response) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+
+            if (!refreshToken) {
+                return res.status(401).json({ error: "Not authenticated" });
+            }
+
+            // Validation des données d'entrée
+            const { shortDesc, longDesc, deadline, listId } = req.body;
+
+            if (!shortDesc || !deadline || !listId) {
+                return res.status(400).json({ error: "Missing required fields: shortDesc, deadline, listId" });
+            }
+
+            const tokenRepo = AppDataSource.getRepository(Token);
+            const userRepo = AppDataSource.getRepository(User);
+            const listRepo = AppDataSource.getRepository(List);
+            const taskRepo = AppDataSource.getRepository(Task);
+
+            // Vérifier que le refreshToken existe en DB
+            const storedToken = await tokenRepo.findOne({
+                where: { refreshToken },
+                relations: ["user"],
+            });
+
+            if (!storedToken) {
+                return res.status(401).json({ error: "Invalid token" });
+            }
+
+            // Vérifier que le refreshToken est encore valide
+            const refreshSecret = process.env.JWT_REFRESH_SECRET!;
+            try {
+                const payload: any = verify(refreshToken, refreshSecret);
+
+                // Récupérer l'utilisateur lié à ce token
+                const user = await userRepo.findOneBy({ id: payload.userId });
+                if (!user) {
+                    return res.status(404).json({ error: "User not found" });
+                }
+
+                // Vérifier que la liste existe et appartient à l'utilisateur
+                const list = await listRepo.findOne({
+                    where: { 
+                        id: listId,
+                        user: { id: user.id },
+                        isDeleted: false 
+                    }
+                });
+
+                if (!list) {
+                    return res.status(404).json({ error: "List not found or access denied" });
+                }
+
+                // Créer la nouvelle tâche
+                const newTask = taskRepo.create({
+                    shortDesc: shortDesc,
+                    longDesc: longDesc || "",
+                    Deadline: new Date(deadline),
+                    list: list,
+                    isAchieved: false,
+                    isDeleted: false
+                });
+
+                const savedTask = await taskRepo.save(newTask);
+
+                res.status(201).json({ 
+                    task: savedTask,
+                    message: "Task created successfully" 
+                });
+
+            } catch (err) {
+                // Le refresh token est expiré ou invalide
+                return res.status(401).json({ error: "Please login again." });
+            }
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Internal server error" });
+        }
+    })
 }
