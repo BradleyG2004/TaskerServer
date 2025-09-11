@@ -350,4 +350,205 @@ export const initRoutes = (app: express.Express) => {
             res.status(500).json({ error: "Internal server error" });
         }
     })
+
+    app.patch('/list', isAuthenticated, async (req: Request, res: Response) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+
+            if (!refreshToken) {
+                return res.status(401).json({ error: "Not authenticated" });
+            }
+
+            const { id } = req.body as { id?: number };
+            if (!id) {
+                return res.status(400).json({ error: "Missing required field: id" });
+            }
+
+            const tokenRepo = AppDataSource.getRepository(Token);
+            const userRepo = AppDataSource.getRepository(User);
+            const listRepo = AppDataSource.getRepository(List);
+
+            const storedToken = await tokenRepo.findOne({
+                where: { refreshToken },
+                relations: ["user"],
+            });
+
+            if (!storedToken) {
+                return res.status(401).json({ error: "Invalid token" });
+            }
+
+            const refreshSecret = process.env.JWT_REFRESH_SECRET!;
+            try {
+                const payload: any = verify(refreshToken, refreshSecret);
+
+                const user = await userRepo.findOneBy({ id: payload.userId });
+                if (!user) {
+                    return res.status(404).json({ error: "User not found" });
+                }
+
+                const list = await listRepo.findOne({
+                    where: {
+                        id: id,
+                        user: { id: user.id },
+                        isDeleted: false
+                    }
+                });
+
+                if (!list) {
+                    return res.status(404).json({ error: "List not found or access denied" });
+                }
+
+                list.isDeleted = true;
+                await listRepo.save(list);
+
+                res.status(200).json({ message: "List dropped successfully" });
+
+            } catch (err) {
+                return res.status(401).json({ error: "Please login again." });
+            }
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Internal server error" });
+        }
+    })
+
+    app.get('/list/:id/tasks', isAuthenticated, async (req: Request, res: Response) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+
+            if (!refreshToken) {
+                return res.status(401).json({ error: "Not authenticated" });
+            }
+
+            const listId = parseInt(req.params.id);
+            if (!listId) {
+                return res.status(400).json({ error: "Invalid list ID" });
+            }
+
+            const tokenRepo = AppDataSource.getRepository(Token);
+            const userRepo = AppDataSource.getRepository(User);
+            const listRepo = AppDataSource.getRepository(List);
+            const taskRepo = AppDataSource.getRepository(Task);
+
+            const storedToken = await tokenRepo.findOne({
+                where: { refreshToken },
+                relations: ["user"],
+            });
+
+            if (!storedToken) {
+                return res.status(401).json({ error: "Invalid token" });
+            }
+
+            const refreshSecret = process.env.JWT_REFRESH_SECRET!;
+            try {
+                const payload: any = verify(refreshToken, refreshSecret);
+
+                const user = await userRepo.findOneBy({ id: payload.userId });
+                if (!user) {
+                    return res.status(404).json({ error: "User not found" });
+                }
+
+                // Verify the list belongs to the user
+                const list = await listRepo.findOne({
+                    where: {
+                        id: listId,
+                        user: { id: user.id },
+                        isDeleted: false
+                    }
+                });
+
+                if (!list) {
+                    return res.status(404).json({ error: "List not found or access denied" });
+                }
+
+                // Fetch all tasks for this list
+                const tasks = await taskRepo.find({
+                    where: {
+                        list: { id: listId },
+                        isDeleted: false
+                    },
+                    order: { createdAt: "DESC" }
+                });
+
+                res.status(200).json({ 
+                    tasks: tasks,
+                    message: "Tasks retrieved successfully" 
+                });
+
+            } catch (err) {
+                return res.status(401).json({ error: "Please login again." });
+            }
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Internal server error" });
+        }
+    })
+
+    app.patch('/task/:id', isAuthenticated, async (req: Request, res: Response) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+
+            if (!refreshToken) {
+                return res.status(401).json({ error: "Not authenticated" });
+            }
+
+            const taskId = parseInt(req.params.id);
+            const { isAchieved } = req.body as { isAchieved?: boolean };
+
+            if (!taskId || typeof isAchieved !== 'boolean') {
+                return res.status(400).json({ error: "Invalid task ID or isAchieved value" });
+            }
+
+            const tokenRepo = AppDataSource.getRepository(Token);
+            const userRepo = AppDataSource.getRepository(User);
+            const taskRepo = AppDataSource.getRepository(Task);
+
+            const storedToken = await tokenRepo.findOne({
+                where: { refreshToken },
+                relations: ["user"],
+            });
+
+            if (!storedToken) {
+                return res.status(401).json({ error: "Invalid token" });
+            }
+
+            const refreshSecret = process.env.JWT_REFRESH_SECRET!;
+            try {
+                const payload: any = verify(refreshToken, refreshSecret);
+
+                const user = await userRepo.findOneBy({ id: payload.userId });
+                if (!user) {
+                    return res.status(404).json({ error: "User not found" });
+                }
+
+                // Find the task and verify it belongs to the user
+                const task = await taskRepo.findOne({
+                    where: {
+                        id: taskId,
+                        isDeleted: false
+                    },
+                    relations: ["list", "list.user"]
+                });
+
+                if (!task || task.list.user.id !== user.id) {
+                    return res.status(404).json({ error: "Task not found or access denied" });
+                }
+
+                // Update the task achievement status
+                task.isAchieved = isAchieved;
+                await taskRepo.save(task);
+
+                res.status(200).json({ 
+                    task: task,
+                    message: "Task updated successfully" 
+                });
+
+            } catch (err) {
+                return res.status(401).json({ error: "Please login again." });
+            }
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Internal server error" });
+        }
+    })
 }
