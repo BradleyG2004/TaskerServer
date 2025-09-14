@@ -1,4 +1,4 @@
-import { Column, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { User } from "./user";
 
 @Entity()
@@ -12,4 +12,7 @@ export class Token {
 
     @ManyToOne(() => User, user => user.tokens)
     user!: User;
+
+    @CreateDateColumn({ type: "datetime" })
+    createdAt!: Date
 }
