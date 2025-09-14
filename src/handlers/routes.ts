@@ -17,7 +17,7 @@ export const initRoutes = (app: express.Express) => {
     const userUC = new userUseCase(AppDataSource);
 
     app.post('/', async (req: Request, res: Response) => {
-        console.log("Home")
+        console.log("I'am the API and I am good !")
         return
     }
     )
@@ -58,8 +58,9 @@ export const initRoutes = (app: express.Express) => {
                 res.status(200).json({ user: { id: user.id, name: user.name, surname: user.surname, email: user.email, }, accessToken: accessToken });
             } catch (err) {
                 // Le refresh token est expiré ou invalide
-                // Supprimer le token expiré de la base de données
-                await tokenRepo.delete({ refreshToken });
+                // Marquer le token comme désactivé au lieu de le supprimer
+                storedToken.refreshToken = "DEACTIVATED";
+                await tokenRepo.save(storedToken);
                 return res.status(401).json({ error: "Refresh token expired. Please login again." });
             }
         } catch (err) {
@@ -125,15 +126,46 @@ export const initRoutes = (app: express.Express) => {
         }
     })
 
-    app.post('/logout', isAuthenticated, async (req: Request, res: Response) => {
-        const refreshToken = req.cookies.refreshToken;
-        if (refreshToken) {
-            await AppDataSource.getRepository(Token).delete({ refreshToken });
-        }
-        res.clearCookie("refreshToken");
-        res.status(200).json({ message: "Logged out ✅" });
-    });
+    app.patch('/token', async (req: Request, res: Response) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+            
+            if (!refreshToken) {
+                return res.status(400).json({ 
+                    error: "No refresh token provided" 
+                });
+            }
 
+            const tokenRepo = AppDataSource.getRepository(Token);
+            const token = await tokenRepo.findOne({
+                where: { refreshToken },
+            });
+
+            if (!token) {
+                return res.status(404).json({ 
+                    error: "Refresh token not found" 
+                });
+            }
+
+            // Mark token as deactivated
+            token.refreshToken = "DEACTIVATED";
+            await tokenRepo.save(token);
+
+            res.status(200).json({ 
+                message: "Token successfully invalidated" 
+            });
+        } catch (error) {
+            console.error("Error invalidating token:", error);
+            res.status(500).json({ 
+                error: "Internal server error" 
+            });
+        }
+    })
+
+
+
+
+    //list gestion
     app.get('/list', isAuthenticated,async (req: Request, res: Response) => {
         try {
             const refreshToken = req.cookies.refreshToken;
@@ -270,6 +302,71 @@ export const initRoutes = (app: express.Express) => {
         }
     })
 
+    app.patch('/list', isAuthenticated, async (req: Request, res: Response) => {
+        try {
+            const refreshToken = req.cookies.refreshToken;
+
+            if (!refreshToken) {
+                return res.status(401).json({ error: "Not authenticated" });
+            }
+
+            const { id } = req.body as { id?: number };
+            if (!id) {
+                return res.status(400).json({ error: "Missing required field: id" });
+            }
+
+            const tokenRepo = AppDataSource.getRepository(Token);
+            const userRepo = AppDataSource.getRepository(User);
+            const listRepo = AppDataSource.getRepository(List);
+
+            const storedToken = await tokenRepo.findOne({
+                where: { refreshToken },
+                relations: ["user"],
+            });
+
+            if (!storedToken) {
+                return res.status(401).json({ error: "Invalid token" });
+            }
+
+            const refreshSecret = process.env.JWT_REFRESH_SECRET!;
+            try {
+                const payload: any = verify(refreshToken, refreshSecret);
+
+                const user = await userRepo.findOneBy({ id: payload.userId });
+                if (!user) {
+                    return res.status(404).json({ error: "User not found" });
+                }
+
+                const list = await listRepo.findOne({
+                    where: {
+                        id: id,
+                        user: { id: user.id },
+                        isDeleted: false
+                    }
+                });
+
+                if (!list) {
+                    return res.status(404).json({ error: "List not found or access denied" });
+                }
+
+                list.isDeleted = true;
+                await listRepo.save(list);
+
+                res.status(200).json({ message: "List dropped successfully" });
+
+            } catch (err) {
+                return res.status(401).json({ error: "Please login again." });
+            }
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: "Internal server error" });
+        }
+    })
+
+
+
+
+    //task gestion
     app.post('/task', isAuthenticated, async (req: Request, res: Response) => {
         try {
             const refreshToken = req.cookies.refreshToken;
@@ -343,67 +440,6 @@ export const initRoutes = (app: express.Express) => {
 
             } catch (err) {
                 // Le refresh token est expiré ou invalide
-                return res.status(401).json({ error: "Please login again." });
-            }
-        } catch (err) {
-            console.error(err);
-            res.status(500).json({ error: "Internal server error" });
-        }
-    })
-
-    app.patch('/list', isAuthenticated, async (req: Request, res: Response) => {
-        try {
-            const refreshToken = req.cookies.refreshToken;
-
-            if (!refreshToken) {
-                return res.status(401).json({ error: "Not authenticated" });
-            }
-
-            const { id } = req.body as { id?: number };
-            if (!id) {
-                return res.status(400).json({ error: "Missing required field: id" });
-            }
-
-            const tokenRepo = AppDataSource.getRepository(Token);
-            const userRepo = AppDataSource.getRepository(User);
-            const listRepo = AppDataSource.getRepository(List);
-
-            const storedToken = await tokenRepo.findOne({
-                where: { refreshToken },
-                relations: ["user"],
-            });
-
-            if (!storedToken) {
-                return res.status(401).json({ error: "Invalid token" });
-            }
-
-            const refreshSecret = process.env.JWT_REFRESH_SECRET!;
-            try {
-                const payload: any = verify(refreshToken, refreshSecret);
-
-                const user = await userRepo.findOneBy({ id: payload.userId });
-                if (!user) {
-                    return res.status(404).json({ error: "User not found" });
-                }
-
-                const list = await listRepo.findOne({
-                    where: {
-                        id: id,
-                        user: { id: user.id },
-                        isDeleted: false
-                    }
-                });
-
-                if (!list) {
-                    return res.status(404).json({ error: "List not found or access denied" });
-                }
-
-                list.isDeleted = true;
-                await listRepo.save(list);
-
-                res.status(200).json({ message: "List dropped successfully" });
-
-            } catch (err) {
                 return res.status(401).json({ error: "Please login again." });
             }
         } catch (err) {
@@ -493,10 +529,13 @@ export const initRoutes = (app: express.Express) => {
             }
 
             const taskId = parseInt(req.params.id);
-            const { isAchieved } = req.body as { isAchieved?: boolean };
+            const { isAchieved, isDeleted } = req.body as { isAchieved?: boolean, isDeleted?: boolean };
 
-            if (!taskId || typeof isAchieved !== 'boolean') {
-                return res.status(400).json({ error: "Invalid task ID or isAchieved value" });
+            if (!taskId) {
+                return res.status(400).json({ error: "Invalid task ID" });
+            }
+            if (typeof isAchieved === 'undefined' && typeof isDeleted === 'undefined') {
+                return res.status(400).json({ error: "Provide isAchieved or isDeleted in body" });
             }
 
             const tokenRepo = AppDataSource.getRepository(Token);
@@ -534,12 +573,17 @@ export const initRoutes = (app: express.Express) => {
                     return res.status(404).json({ error: "Task not found or access denied" });
                 }
 
-                // Update the task achievement status
-                task.isAchieved = isAchieved;
-                await taskRepo.save(task);
+                // Update fields conditionally
+                if (typeof isAchieved === 'boolean') {
+                    task.isAchieved = isAchieved;
+                }
+                if (typeof isDeleted === 'boolean') {
+                    task.isDeleted = isDeleted;
+                }
+                const saved = await taskRepo.save(task);
 
                 res.status(200).json({ 
-                    task: task,
+                    task: saved,
                     message: "Task updated successfully" 
                 });
 
@@ -551,4 +595,7 @@ export const initRoutes = (app: express.Express) => {
             res.status(500).json({ error: "Internal server error" });
         }
     })
+
+
+
 }
