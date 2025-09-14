@@ -14,13 +14,25 @@ import { isAuthenticated } from "./middleware/Authenticated";
 
 
 export const initRoutes = (app: express.Express) => {
+    console.log("✅ initRoutes called");
     const userUC = new userUseCase(AppDataSource);
 
     app.post('/', async (req: Request, res: Response) => {
         console.log("I'am the API and I am good !")
+        res.json({ message: "API is working!" })
         return
-    }
-    )
+    })
+
+    // Test endpoint to verify routes are working
+    app.get('/test', async (req: Request, res: Response) => {
+        console.log("GET /test endpoint called");
+        res.status(200).json({ message: "Test endpoint working!", timestamp: new Date().toISOString() });
+    });
+
+    app.patch('/test-patch', async (req: Request, res: Response) => {
+        console.log("PATCH /test-patch endpoint called");
+        res.status(200).json({ message: "PATCH test endpoint working!", timestamp: new Date().toISOString() });
+    });
 
     app.get('/check_refresh', async (req: Request, res: Response) => {
         try {
@@ -124,49 +136,54 @@ export const initRoutes = (app: express.Express) => {
             res.status(500).json({ "error": "internal error retry later" })
             return
         }
-    })
+    });
 
-    app.patch('/token', async (req: Request, res: Response) => {
+    console.log("🚀 Registering DELETE /logout");
+
+    app.delete('/logout', async (req: Request, res: Response) => {
+        console.log("DELETE /logout endpoint called");
+        console.log("Request received at:", new Date().toISOString());
         try {
-            const refreshToken = req.cookies.refreshToken;
-            
-            if (!refreshToken) {
-                return res.status(400).json({ 
-                    error: "No refresh token provided" 
+            const rToken = req.cookies.refreshToken;
+
+            if (!rToken) {
+                return res.status(400).json({
+                    error: "No refresh token provided"
                 });
             }
 
             const tokenRepo = AppDataSource.getRepository(Token);
-            const token = await tokenRepo.findOne({
-                where: { refreshToken },
+            const tokenf = await tokenRepo.findOne({
+                where: { refreshToken: rToken },
             });
 
-            if (!token) {
-                return res.status(404).json({ 
-                    error: "Refresh token not found" 
+            if (!tokenf) {
+                return res.status(500).json({
+                    error: "Refresh token not found"
                 });
             }
 
-            // Mark token as deactivated
-            token.refreshToken = "DEACTIVATED";
-            await tokenRepo.save(token);
+            // Supprimer le token au lieu de le modifier
+            await tokenRepo.remove(tokenf);
 
-            res.status(200).json({ 
-                message: "Token successfully invalidated" 
+            res.clearCookie("refreshToken"); // facultatif : supprime aussi le cookie côté client
+
+            res.status(200).json({
+                message: "Token successfully deleted"
             });
         } catch (error) {
-            console.error("Error invalidating token:", error);
-            res.status(500).json({ 
-                error: "Internal server error" 
+            console.error("Error deleting token:", error);
+            res.status(500).json({
+                error: "Internal server error"
             });
         }
-    })
+    });
 
 
 
 
     //list gestion
-    app.get('/list', isAuthenticated,async (req: Request, res: Response) => {
+    app.get('/list', isAuthenticated, async (req: Request, res: Response) => {
         try {
             const refreshToken = req.cookies.refreshToken;
 
@@ -201,17 +218,17 @@ export const initRoutes = (app: express.Express) => {
 
                 // Récupérer toutes les listes de cet utilisateur (non supprimées)
                 const userLists = await listRepo.find({
-                    where: { 
+                    where: {
                         user: { id: user.id },
-                        isDeleted: false 
+                        isDeleted: false
                     },
                     relations: ["tasks"],
                     order: { createdAt: "DESC" }
                 });
 
-                res.status(200).json({ 
+                res.status(200).json({
                     lists: userLists,
-                    message: "Lists retrieved successfully" 
+                    message: "Lists retrieved successfully"
                 });
 
             } catch (err) {
@@ -267,10 +284,10 @@ export const initRoutes = (app: express.Express) => {
 
                 // Vérifier si une liste avec ce nom existe déjà pour cet utilisateur
                 const existingList = await listRepo.findOne({
-                    where: { 
+                    where: {
                         name: createListRequest.name,
                         user: { id: user.id },
-                        isDeleted: false 
+                        isDeleted: false
                     }
                 });
 
@@ -287,9 +304,9 @@ export const initRoutes = (app: express.Express) => {
 
                 const savedList = await listRepo.save(newList);
 
-                res.status(201).json({ 
+                res.status(201).json({
                     list: savedList,
-                    message: "List created successfully" 
+                    message: "List created successfully"
                 });
 
             } catch (err) {
@@ -410,10 +427,10 @@ export const initRoutes = (app: express.Express) => {
 
                 // Vérifier que la liste existe et appartient à l'utilisateur
                 const list = await listRepo.findOne({
-                    where: { 
+                    where: {
                         id: listId,
                         user: { id: user.id },
-                        isDeleted: false 
+                        isDeleted: false
                     }
                 });
 
@@ -433,9 +450,9 @@ export const initRoutes = (app: express.Express) => {
 
                 const savedTask = await taskRepo.save(newTask);
 
-                res.status(201).json({ 
+                res.status(201).json({
                     task: savedTask,
-                    message: "Task created successfully" 
+                    message: "Task created successfully"
                 });
 
             } catch (err) {
@@ -506,9 +523,9 @@ export const initRoutes = (app: express.Express) => {
                     order: { createdAt: "DESC" }
                 });
 
-                res.status(200).json({ 
+                res.status(200).json({
                     tasks: tasks,
-                    message: "Tasks retrieved successfully" 
+                    message: "Tasks retrieved successfully"
                 });
 
             } catch (err) {
@@ -582,9 +599,9 @@ export const initRoutes = (app: express.Express) => {
                 }
                 const saved = await taskRepo.save(task);
 
-                res.status(200).json({ 
+                res.status(200).json({
                     task: saved,
-                    message: "Task updated successfully" 
+                    message: "Task updated successfully"
                 });
 
             } catch (err) {
@@ -596,6 +613,8 @@ export const initRoutes = (app: express.Express) => {
         }
     })
 
+    const listEndpoints = require('express-list-endpoints');
+    console.log(listEndpoints(app));
 
 
 }
