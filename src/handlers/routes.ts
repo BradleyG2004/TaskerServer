@@ -11,6 +11,7 @@ import { createListValidation } from "./validators/list-validator";
 import { userUseCase } from "../domain/user-usecase"
 import { notAuthenticated } from "./middleware/notAuthenticated";
 import { isAuthenticated } from "./middleware/Authenticated";
+import { createTaskValidation } from './validators/task-validator';
 
 
 export const initRoutes = (app: express.Express) => {
@@ -392,12 +393,13 @@ export const initRoutes = (app: express.Express) => {
                 return res.status(401).json({ error: "Not authenticated" });
             }
 
-            // Validation des données d'entrée
-            const { shortDesc, longDesc, deadline, listId } = req.body;
-
-            if (!shortDesc || !deadline || !listId) {
-                return res.status(400).json({ error: "Missing required fields: shortDesc, deadline, listId" });
+            // Validate input data using Joi schema
+            const validationResult = createTaskValidation.validate(req.body);
+            if (validationResult.error) {
+                return res.status(400).json({ error: validationResult.error.details.map(detail => detail.message).join(', ') });
             }
+
+            const { shortDesc, longDesc, deadline, listId } = validationResult.value;
 
             const tokenRepo = AppDataSource.getRepository(Token);
             const userRepo = AppDataSource.getRepository(User);
